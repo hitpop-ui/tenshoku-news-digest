@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>転職ニュースダイジェスト</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic', sans-serif;
+      background: #f5f4f0;
+      color: #1a1a1a;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+    .wrapper { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 22px; font-weight: 500; margin-bottom: 6px; }
+    .subtitle { font-size: 14px; color: #666; margin-bottom: 2rem; line-height: 1.6; }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      border: 0.5px solid rgba(0,0,0,0.12);
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .card:hover { background: #fafaf8; }
+    .card-date { font-size: 13px; color: #888; margin-bottom: 4px; }
+    .card-title { font-size: 15px; font-weight: 500; }
+    .card-type {
+      display: inline-block; font-size: 11px; padding: 2px 8px;
+      border-radius: 6px; margin-top: 6px;
+    }
+    .type-digest { background: #e6f1fb; color: #185FA5; }
+    .type-threads { background: #eaf3de; color: #3B6D11; }
+    .type-weekly { background: #fde8d0; color: #8B4513; }
+    .type-competitor { background: #f0e6fb; color: #6B21A8; }
+    .loading { font-size: 14px; color: #888; text-align: center; padding: 2rem; }
+    .error { font-size: 14px; color: #c0392b; text-align: center; padding: 2rem; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .tab {
+      font-size: 13px; padding: 6px 14px; border-radius: 20px;
+      border: 0.5px solid rgba(0,0,0,0.15); background: #fff;
+      color: #888; cursor: pointer; transition: all 0.15s;
+    }
+    .tab:hover { background: #f0efe9; }
+    .tab.active { background: #1a1a1a; color: #fff; border-color: transparent; }
+    .empty { font-size: 14px; color: #888; text-align: center; padding: 3rem 1rem; }
+    .content-view {
+      background: #fff; border-radius: 12px;
+      border: 0.5px solid rgba(0,0,0,0.12); padding: 1.5rem;
+      margin-bottom: 1rem; display: none;
+    }
+    .content-view.active { display: block; }
+    .content-body {
+      font-size: 14px; line-height: 1.8; white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .back-btn {
+      font-size: 13px; color: #0066cc; cursor: pointer;
+      margin-bottom: 1rem; display: inline-block;
+    }
+    .back-btn:hover { color: #0044aa; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <h1>転職ニュースダイジェスト</h1>
+    <p class="subtitle">ソラ｜20代の転職攻略（@sora_tensyoku）の情報収集ダッシュボード</p>
+
+    <div class="tabs">
+      <div class="tab active" onclick="filterFiles('all')">すべて</div>
+      <div class="tab" onclick="filterFiles('digests')">ダイジェスト</div>
+      <div class="tab" onclick="filterFiles('threads-drafts')">Threads案</div>
+      <div class="tab" onclick="filterFiles('weekly-ideas')">週次ネタ</div>
+      <div class="tab" onclick="filterFiles('competitor-analysis')">競合分析</div>
+    </div>
+
+    <div id="list-view"></div>
+    <div id="content-view" class="content-view">
+      <div class="back-btn" onclick="showList()">← 一覧に戻る</div>
+      <div id="content-body" class="content-body"></div>
+    </div>
+  </div>
+
+  <script>
+    let allFiles = [];
+    let currentFilter = 'all';
+
+    function getType(path) {
+      if (path.includes('digests/')) return { label: 'ダイジェスト', cls: 'type-digest' };
+      if (path.includes('threads-drafts/')) return { label: 'Threads案', cls: 'type-threads' };
+      if (path.includes('weekly-ideas/')) return { label: '週次ネタ', cls: 'type-weekly' };
+      if (path.includes('competitor-analysis/')) return { label: '競合分析', cls: 'type-competitor' };
+      return { label: 'その他', cls: '' };
+    }
+
+    function getDate(path) {
+      const match = path.match(/(\d{4})[/-](\d{2})[/-](\d{2})/);
+      if (match) return `${match[1]}/${match[2]}/${match[3]}`;
+      const fname = path.split('/').pop().replace('.md', '');
+      return fname;
+    }
+
+    function getTitle(path) {
+      const fname = path.split('/').pop().replace('.md', '');
+      const type = getType(path);
+      return `${type.label} - ${fname}`;
+    }
+
+    async function loadFiles() {
+      const listView = document.getElementById('list-view');
+      listView.innerHTML = '<div class="loading">読み込み中...</div>';
+
+      try {
+        const res = await fetch('files.json');
+        allFiles = await res.json();
+
+        if (allFiles.length === 0) {
+          listView.innerHTML = '<div class="empty">まだファイルがないよ。スケジュールタスクが実行されると自動で追加されるよ。</div>';
+          return;
+        }
+
+        renderList();
+      } catch(e) {
+        listView.innerHTML = '<div class="error">files.jsonの読み込みに失敗したよ。</div>';
+      }
+    }
+
+    function renderList() {
+      const listView = document.getElementById('list-view');
+      const filtered = currentFilter === 'all'
+        ? allFiles
+        : allFiles.filter(f => f.includes(currentFilter));
+
+      if (filtered.length === 0) {
+        listView.innerHTML = '<div class="empty">該当するファイルがないよ。</div>';
+        return;
+      }
+
+      listView.innerHTML = filtered.map(f => {
+        const type = getType(f);
+        return `
+          <div class="card" onclick="loadContent('${f}')">
+            <div class="card-date">${getDate(f)}</div>
+            <div class="card-title">${getTitle(f)}</div>
+            <span class="card-type ${type.cls}">${type.label}</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadContent(path) {
+      document.getElementById('list-view').style.display = 'none';
+      const contentView = document.getElementById('content-view');
+      const contentBody = document.getElementById('content-body');
+      contentView.classList.add('active');
+      contentBody.textContent = '読み込み中...';
+
+      try {
+        const res = await fetch(path);
+        const text = await res.text();
+        contentBody.textContent = text;
+      } catch(e) {
+        contentBody.textContent = 'ファイルの読み込みに失敗したよ。';
+      }
+    }
+
+    function showList() {
+      document.getElementById('list-view').style.display = 'block';
+      document.getElementById('content-view').classList.remove('active');
+    }
+
+    function filterFiles(filter) {
+      currentFilter = filter;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+      renderList();
+    }
+
+    loadFiles();
+  </script>
+</body>
+</html>
